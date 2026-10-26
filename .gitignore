@@ -1,0 +1,6 @@
+**/*
+!src/**/*
+!docs/**/*
+!Atividade avaliativa.md
+!REAME.md
+!.gitignore

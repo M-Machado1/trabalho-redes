@@ -13,7 +13,7 @@ Requisitos atendidos:
 - Um coletor (servidor) e múltiplos sensores (clientes) simultâneos.
 - Comunicação por sockets UDP (`SOCK_DGRAM`).
 - Protocolo de aplicação próprio, em texto, chamado **TelemP/1.0**.
-- Mecanismos próprios de confiabilidade apenas onde são necessários (registro e detecção de perdas).
+- Mecanismos próprios de confiabilidade apenas onde são necessários (registro, saída e detecção de perdas).
 - Tratamento de erros de rede, de protocolo e de entrada.
 
 ## 2. Integrantes
@@ -25,8 +25,8 @@ Requisitos atendidos:
 
 ## 3. Arquitetura
 
-- **Coletor** (`src/collector.py`): único processo com um socket UDP ligado a uma porta fixa. Recebe datagramas de qualquer sensor, mantém uma tabela de estado por sensor (último número de sequência, último instante visto, situação) e responde apenas aos comandos que exigem confirmação. Não mantém conexão com ninguém.
-- **Sensor** (`src/sensor.py`): gera leituras simuladas, envia `REG` e depois um `DATA` a cada intervalo. Cada sensor tem um socket UDP próprio. Retransmite o `REG` até receber `ACK`.
+- **Coletor** (`src/collector.py`): único processo com um socket UDP ligado a uma porta fixa. Recebe datagramas de qualquer sensor, mantém uma tabela de estado por sensor (último número de sequência, último instante visto, situação) e responde apenas a `REG` e `BYE`, os comandos que exigem confirmação. Não mantém conexão com ninguém.
+- **Sensor** (`src/sensor.py`): gera leituras simuladas, envia `REG` e depois um `DATA` a cada intervalo. Cada sensor tem um socket UDP próprio e uma **sessão** (8 caracteres hexadecimais gerados no boot). Retransmite `REG` e `BYE` até receber `ACK`.
 - **Protocolo** (`src/protocol.py`): codificação, decodificação e validação das mensagens TelemP/1.0.
 
 ```mermaid
@@ -56,15 +56,16 @@ Troca de mensagens com registro, leitura, perda e retransmissão:
 sequenceDiagram
     participant S as Sensor s01
     participant C as Coletor UDP :6000
-    S->>C: REG|s01|5
+    S->>C: REG|1|s01|5|a1b2c3d4
     Note over S,C: REG perdido, sem ACK no prazo de 1 s
-    S->>C: REG|s01|5 (retransmissão 1)
-    C-->>S: ACK|REG|s01
-    S->>C: DATA|s01|1|1767225600|21.5
-    S--xC: DATA|s01|2|1767225605|21.7 (perdido na rede)
-    S->>C: DATA|s01|3|1767225615|21.9
+    S->>C: REG|1|s01|5|a1b2c3d4 (retransmissão 1)
+    C-->>S: ACK|1|REG|s01|a1b2c3d4
+    S->>C: DATA|1|s01|a1b2c3d4|1|1767225600|21.5
+    S--xC: DATA|1|s01|a1b2c3d4|2|1767225605|21.7 (perdido na rede)
+    S->>C: DATA|1|s01|a1b2c3d4|3|1767225615|21.9
     Note over C: Lacuna detectada: seq 2 ausente
-    S->>C: BYE|s01
+    S->>C: BYE|1|s01|a1b2c3d4
+    C-->>S: ACK|1|BYE|s01|a1b2c3d4
 ```
 
 Situação de cada sensor no coletor:
@@ -72,13 +73,15 @@ Situação de cada sensor no coletor:
 ```mermaid
 stateDiagram-v2
     [*] --> Desconhecido
-    Desconhecido --> Online: REG confirmado por ACK
-    Online --> Online: DATA recebido
-    Online --> Offline: sem datagramas por 15 s
-    Offline --> Online: DATA ou REG recebido
-    Online --> Desconhecido: BYE recebido
-    Offline --> Desconhecido: BYE recebido
+    Desconhecido --> Online: REG válido (ACK enviado)
+    Online --> Online: DATA ou REG da mesma sessão
+    Online --> Offline: sem datagramas por max(15 s, 3 × intervalo)
+    Offline --> Online: DATA ou REG da mesma sessão
+    Online --> Desconhecido: BYE (ACK|BYE enviado)
+    Offline --> Desconhecido: BYE (ACK|BYE enviado)
 ```
+
+A linha de um sensor `Offline` continua na tabela para relatório, mas o identificador já está liberado: um `REG` de sessão nova é aceito. O `BYE` remove a linha após o período de retenção.
 
 ## 4. Protocolo de transporte: UDP
 
@@ -116,13 +119,15 @@ O coletor escuta em `0.0.0.0` por padrão. A porta 6000 está fora das portas be
 
 ## 6. Protocolo da aplicação: TelemP/1.0
 
-- **Codificação:** ASCII/UTF-8.
+- **Codificação:** ASCII imprimível (`0x20`–`0x7E`). `CR`, `LF` e `NUL` são inválidos.
 - **Unidade de transmissão:** um datagrama UDP contém exatamente uma mensagem. Não é preciso delimitador de fim de mensagem, diferentemente do fluxo TCP. O UDP preserva fronteiras de mensagem.
-- **Campos:** separados por `|`.
-- **Tamanho máximo:** 512 bytes por datagrama. Datagramas maiores são descartados pelo coletor com `ERR|TOO_LONG`, quando possível.
-- **Identificador do sensor:** de 1 a 16 caracteres alfanuméricos, único na rede.
-- **Número de sequência:** inteiro crescente por sensor, iniciando em 1 a cada `REG`. Usado para detectar perdas, duplicatas e reordenação.
-- **Timestamp:** segundos desde a época Unix, no relógio do sensor.
+- **Campos:** separados por `|`, sem campo vazio e sem espaço nas pontas.
+- **Versão:** primeiro campo depois do tipo, hoje sempre `1`. Mensagem com outra versão recebe `ERR|BAD_REQUEST`.
+- **Tamanho máximo:** 512 bytes por datagrama. O coletor lê com buffer de 65 535 bytes e compara o tamanho com 512 (um `recvfrom` de 512 bytes truncaria em silêncio); acima disso responde `ERR|TOO_LONG` e descarta.
+- **Identificador do sensor:** de 1 a 16 caracteres alfanuméricos, sensível a maiúsculas, único na rede.
+- **Sessão:** 8 dígitos hexadecimais minúsculos gerados no boot do processo sensor. Diferencia uma **retransmissão** de `REG` (mesma sessão) de um **reinício** do sensor (sessão nova).
+- **Número de sequência:** inteiro crescente por sensor, iniciando em 1 **a cada sessão** (não a cada `REG`). Usado para detectar perdas, duplicatas e reordenação.
+- **Timestamp:** segundos desde a época Unix, no relógio do sensor. Serve para exibição; a ordem é dada pelo número de sequência.
 
 ## 7. Mensagens
 
@@ -130,39 +135,42 @@ O coletor escuta em `0.0.0.0` por padrão. A porta 6000 está fora das portas be
 
 | Mensagem | Formato | Confirmação | Descrição |
 | --- | --- | --- | --- |
-| REG | `REG\|id\|intervalo` | Sim (ACK) | Registra o sensor e informa o intervalo entre leituras, em segundos. Retransmitida até 3 vezes, com prazo de 1 s. |
-| DATA | `DATA\|id\|seq\|timestamp\|valor` | Não | Envia uma leitura. Não é retransmitida. |
-| BYE | `BYE\|id` | Não | Anuncia saída do sensor. Pode se perder; o coletor então detecta o sensor como offline. |
+| REG | `REG\|versao\|id\|intervalo\|sessao` | Sim (ACK) | Registra a sessão do sensor e informa o intervalo entre leituras, em segundos (1 a 3600). 1 envio + 3 retransmissões de 1 s. Idempotente: reenviar com a mesma sessão não zera contadores. |
+| DATA | `DATA\|versao\|id\|sessao\|seq\|timestamp\|valor` | Não | Envia uma leitura. Não é retransmitida. O primeiro `DATA` da sessão define a linha de base da sequência. |
+| BYE | `BYE\|versao\|id\|sessao` | Sim (ACK) | Anuncia a saída e libera o identificador na hora. Reenviado até 2 vezes, com prazo de 500 ms. Se se perder, o coletor libera o identificador pelo timeout de silêncio. |
 
 **Coletor → Sensor**
 
 | Mensagem | Formato | Descrição |
 | --- | --- | --- |
-| ACK | `ACK\|REG\|id` | Confirma o registro. Só é enviado em resposta a `REG` válido. |
-| ERR | `ERR\|código\|descrição` | Informa erro de formato ou de estado (ver seção 8). |
+| ACK | `ACK\|versao\|REG\|id\|sessao` e `ACK\|versao\|BYE\|id\|sessao` | Confirma `REG` ou `BYE`. O tipo confirmado e a sessão permitem ao sensor descartar um ACK atrasado de uma sessão anterior. |
+| ERR | `ERR\|versao\|codigo\|descricao` | Informa erro de formato ou de estado (ver seção 8). É apenas informativo: não é confirmado e não dispara retransmissão. |
 
-Os valores de `DATA` são sempre numéricos, com faixa aceita de -50 a 150. Valores fora da faixa geram `ERR|VALUE_OUT_OF_RANGE`.
+Os valores de `DATA` são sempre numéricos, com até 3 casas decimais, ponto como separador (nada de vírgula ou expoente) e faixa aceita de -50 a 150. Valores fora da faixa geram `ERR|VALUE_OUT_OF_RANGE`.
 
 ## 8. Tratamento de erros
 
 | Situação | Quem trata | Tratamento |
 | --- | --- | --- |
-| `REG` ou `ACK` perdido | Sensor | Retransmite `REG` após 1 s, até 3 vezes. Se não houver `ACK`, registra erro e tenta novamente no próximo ciclo. |
-| `DATA` perdido | Coletor | Detecta lacuna na sequência e incrementa o contador de perdas do sensor. Não há retransmissão, pois o dado já estaria obsoleto. |
-| `DATA` duplicado | Coletor | Descarta quando `seq` já foi processado. |
-| `DATA` fora de ordem | Coletor | Descarta quando `seq` é menor que o último aceito, registrando reordenação. |
-| Sensor silencioso | Coletor | Após 15 s sem datagramas, marca o sensor como `Offline`. Volta a `Online` com o próximo datagrama. |
+| `REG` ou `ACK` perdido | Sensor | 1 envio + 3 retransmissões de `REG`, com 1 s de espera. Sem `ACK`, descarta a leitura e tenta de novo no próximo intervalo; nenhum `DATA` é enviado antes do `ACK`. |
+| `BYE` ou `ACK` do `BYE` perdido | Sensor | Reenvia `BYE` até 2 vezes (500 ms) e encerra de qualquer forma; o coletor libera o identificador pelo timeout. |
+| `DATA` perdido | Coletor | Detecta lacuna na sequência e soma ao contador de perdas **um por datagrama faltante**. Não há retransmissão, pois o dado já estaria obsoleto. |
+| `DATA` duplicado | Coletor | Descarta quando `seq` já foi visto na janela recente (64) e incrementa o contador de duplicatas. |
+| `DATA` fora de ordem | Coletor | Descarta quando `seq` é menor que o último aceito e não está na janela recente, registrando reordenação. |
+| Sensor silencioso | Coletor | Após `max(15 s, 3 × intervalo)` sem datagramas, marca o sensor como `Offline`. Volta a `Online` com o próximo datagrama da mesma sessão. A linha continua na tabela para relatório, mas o identificador já está liberado. |
 | Porta do coletor fechada (ICMP port unreachable) | Sensor | No Linux, o próximo `recvfrom` levanta `ConnectionRefusedError`. Tratado como "coletor indisponível": loga e tenta no próximo ciclo. |
-| Mensagem malformada (campos ausentes, tipos inválidos) | Coletor | `ERR\|BAD_REQUEST`. Não altera o estado do sensor. |
-| Datagrama acima do limite de 512 bytes | Coletor | Lido com buffer de tamanho limitado; ao detectar truncamento, responde `ERR\|TOO_LONG` e descarta. |
-| `REG` com identificador já ativo de outro endereço | Coletor | `ERR\|NAME_IN_USE`. |
+| Mensagem malformada (campos ausentes, versão desconhecida, sessão inválida, tipos inválidos) | Coletor | `ERR\|BAD_REQUEST`. Não altera o estado do sensor. |
+| Datagrama acima do limite de 512 bytes | Coletor | Lido com buffer de 65 535 bytes; se o tamanho passar de 512, responde `ERR\|TOO_LONG` (resposta de até 64 bytes) e descarta. |
+| `REG` com sessão nova para identificador já ativo | Coletor | `ERR\|NAME_IN_USE`; o estado existente não é alterado. |
+| `interval` fora de 1 a 3600 | Coletor | `ERR\|BAD_INTERVAL`. |
+| Reinício do sensor sem `BYE` | Coletor | O `REG` de sessão nova só é aceito depois do timeout de silêncio; até lá recebe `ERR\|NAME_IN_USE` e o sensor retenta a cada intervalo. |
 | Valor fora da faixa | Coletor | `ERR\|VALUE_OUT_OF_RANGE`. O datagrama é descartado. |
 | `DATA` de sensor não registrado | Coletor | `ERR\|NOT_REGISTERED`, para o sensor enviar `REG` novamente. |
 | Erro ao enviar (`OSError`, rede inacessível) | Sensor | Captura, registra e tenta no próximo ciclo. |
-| Ctrl+C no sensor | Sensor | Tenta enviar `BYE` e encerra. |
+| Ctrl+C no sensor | Sensor | Envia `BYE` e aguarda `ACK\|BYE` por até 1,5 s (3 tentativas de 500 ms); encerra de qualquer forma. |
 | Exceção ao processar um datagrama | Coletor | `try/except` por datagrama; o laço principal continua. |
 
-Observação de segurança: respostas `ERR` são enviadas ao endereço de origem do datagrama. Como o UDP aceita endereços forjados, o coletor deve limitar as respostas de erro e nunca ampliar o tamanho da resposta em relação à requisição.
+Observação de segurança: respostas `ERR` são enviadas ao endereço de origem do datagrama. Como o UDP aceita endereços forjados, o coletor limita cada `ERR` a 64 bytes, envia no máximo 1 por IP de origem por segundo (20 por segundo no total), não ecoa dados da requisição e nunca altera o estado por causa de uma mensagem inválida. A sessão dá idempotência, não autenticidade: o protocolo não tem autenticação.
 
 ## 9. Estrutura do repositório
 
@@ -170,37 +178,55 @@ Observação de segurança: respostas `ERR` são enviadas ao endereço de origem
 trabalho-redes/
 ├── README.md
 ├── docs/
-│   └── diagrama.png
-├── captura/
-│   └── telemetry.pcapng
+│   ├── PROTOCOLO.md
+│   └── REQUISITOS-SERVIDOR.md
+├── capture/
+│   └── telemetria.pcapng
 └── src/
+    ├── __init__.py
     ├── protocol.py
     ├── collector.py
     └── sensor.py
+
 ```
 
 ## 10. Instruções de execução
 
-**Requisitos:** Python 3.10 ou superior. Não há dependências externas (apenas biblioteca padrão: `socket`, `time`, `random`, `argparse`).
+**Requisitos:** Python 3.10 ou superior. Não há dependências externas (apenas biblioteca padrão: `socket`, `selectors`, `secrets`, `time`, `random`, `argparse`, `logging`).
 
-**1. Iniciar o coletor** (em um terminal):
+Os comandos abaixo são executados **na raiz do repositório**, porque `src` é um pacote. No Windows, use `python` no lugar de `python3`.
 
-```bash
-python3 src/coletor.py --host 0.0.0.0 --port 6000
+### 1. Iniciar o coletor:
+
+Em um terminal:
+
+```sh
+python3 -m src.collector --host 0.0.0.0 --port 6000
 ```
 
-**2. Iniciar um ou mais sensores** (em outros terminais):
+### 2. Iniciar um ou mais sensores
 
-```bash
-python3 src/sensor.py --host 127.0.0.1 --port 6000 --id s01 --intervalo 5
-python3 src/sensor.py --host 127.0.0.1 --port 6000 --id s02 --intervalo 3
+Em outros terminais:
+
+```sh
+python3 -m src.sensor --host 127.0.0.1 --port 6000 --id s01 --interval 5
+python3 -m src.sensor --host 127.0.0.1 --port 6000 --id s02 --interval 3
 ```
 
-Para testar em rede local, substitua `127.0.0.1` pelo IP da máquina do coletor.
+>[!tip]
+>Para testar em rede local, substitua `127.0.0.1` pelo IP da máquina do coletor.
 
-**Teste de perda simulada:** o sensor aceita `--perda 0.2`, que descarta aleatoriamente 20% dos `DATA` antes do envio. Use para verificar a detecção de lacunas no coletor.
+### Teste de perda de `DATA`:
 
-**Saída do coletor:** tabela com id, situação, último valor, número de sequência e contadores de perdas, duplicatas e reordenações.
+O sensor aceita `--loss 0.2`, que descarta aleatoriamente 20% dos `DATA` antes do envio. Use para verificar a detecção de lacunas no coletor.
+
+### Teste de perda de `ACK`:
+
+O coletor aceita `--drop-ack 0.3`, que descarta 30% dos `ACK`/`ERR` enviados. Use para observar a retransmissão do `REG` no Wireshark.
+
+### Saída do coletor:
+
+Tabela com identificador, situação, endereço, intervalo, último número de sequência, último valor, idade do último datagrama e contadores de perdas, duplicatas e reordenações.
 
 ## 11. Captura de tráfego (Wireshark)
 
@@ -209,11 +235,12 @@ Arquivo: `captura/telemetria.pcapng`. Filtro de exibição: `udp.port == 6000`.
 Evidências a apresentar:
 
 1. **Ausência de handshake:** o primeiro datagrama já é `REG`, sem SYN, SYN-ACK ou ACK.
-2. **Payload legível:** `REG|s01|5`, `DATA|s01|3|...` e `ACK|REG|s01` aparecem em texto claro (use *Follow UDP Stream*).
+2. **Payload legível:** `REG|1|s01|5|a1b2c3d4`, `DATA|1|s01|a1b2c3d4|3|...` e `ACK|1|REG|s01|a1b2c3d4` aparecem em texto claro (use *Follow UDP Stream*).
 3. **Cabeçalho UDP de 8 bytes:** comparar com o cabeçalho TCP de 20 bytes da alternativa de chat.
-4. **Retransmissão do REG:** dois datagramas `REG` com intervalo de cerca de 1 s quando o `ACK` é descartado com o filtro de perda do Wireshark ou da simulação.
+4. **Retransmissão do REG:** com `--drop-ack 0.5` no coletor, dois `REG` com a **mesma sessão** e cerca de 1 s de diferença.
 5. **Lacunas de sequência:** datagramas `DATA` com números de sequência faltando, correspondendo aos registros do coletor.
 6. **Ausência de controle de congestionamento:** os datagramas saem no ritmo definido pela aplicação, sem reduções de taxa.
+7. **Sessão:** reiniciar o sensor muda os últimos 8 caracteres; a retransmissão do `REG` os mantém iguais. É o que separa perda de `ACK` de reinício do processo.
 
 ## 12. Mapeamento das questões do projeto
 
@@ -221,11 +248,13 @@ Evidências a apresentar:
 | --- | --- |
 | 1. Qual problema a aplicação resolve? | Seção 1 |
 | 2. Quem são os processos envolvidos? | Seção 3 |
-| 3. Como ocorre a comunicação? | Seções 3 e 6 |
+| 3. Como ocorre a comunicação? | Seções 3 e 6; `docs/PROTOCOLO.md` §2 |
 | 4. Qual protocolo de transporte? | Seção 4 |
 | 5. Por que esse protocolo é adequado? | Seção 4, "Justificativa" |
-| 6. Qual é o protocolo da aplicação? | Seção 6 |
-| 7. Quais mensagens podem ser trocadas? | Seção 7 |
+| 6. Qual é o protocolo da aplicação? | Seções 6 e 7; `docs/PROTOCOLO.md` |
+| 7. Quais mensagens podem ser trocadas? | Seção 7; `docs/PROTOCOLO.md` §5 |
 | 8. O que aconteceria com o outro protocolo? | Seção 4, "E se fosse usado TCP?" |
-| 9. Quais situações de erro podem ocorrer? | Seção 8 |
-| 10. Como essas situações são tratadas? | Seção 8 |
+| 9. Quais situações de erro podem ocorrer? | Seção 8; `docs/REQUISITOS-SERVIDOR.md` §7 |
+| 10. Como essas situações são tratadas? | Seção 8; `docs/PROTOCOLO.md` §7.3 e `docs/REQUISITOS-SERVIDOR.md` §6–§7 |
+
+Especificação detalhada: [`docs/PROTOCOLO.md`](docs/PROTOCOLO.md) (gramática, mensagens, erros e a máquina de estados do sensor) e [`docs/REQUISITOS-SERVIDOR.md`](docs/REQUISITOS-SERVIDOR.md) (requisitos, contadores, interface e critérios de aceitação).
