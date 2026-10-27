@@ -1,4 +1,4 @@
-# Requisitos do coletor (servidor TelemP/1.0)
+# Requisitos do coletor (servidor TelemProto/1.0)
 
 **Status:** rascunho para revisão · **Versão do documento:** 0.1 · **Data:** 2026-10-26
 

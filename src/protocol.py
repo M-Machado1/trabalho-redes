@@ -1,4 +1,4 @@
-"""TelemP/1.0 wire codec.
+"""TelemProto/1.0 wire codec.
 
 This module only converts between bytes and message objects. It knows nothing
 about the network, sensors or collector state. Grammar and validation order follow
@@ -42,7 +42,7 @@ _FIELD_COUNTS = {"REG": 5, "DATA": 7, "BYE": 4, "ACK": 5, "ERR": 4}
 
 
 class ErrorCode(str, Enum):
-    """``err-code`` values defined by TelemP/1.0."""
+    """``err-code`` values defined by TelemProto/1.0."""
 
     BAD_REQUEST = "BAD_REQUEST"
     TOO_LONG = "TOO_LONG"

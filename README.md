@@ -12,7 +12,7 @@ Requisitos atendidos:
 
 - Um coletor (servidor) e múltiplos sensores (clientes) simultâneos.
 - Comunicação por sockets UDP (`SOCK_DGRAM`).
-- Protocolo de aplicação próprio, em texto, chamado **TelemP/1.0**.
+- Protocolo de aplicação próprio, em texto, chamado **TelemProto/1.0**.
 - Mecanismos próprios de confiabilidade apenas onde são necessários (registro, saída e detecção de perdas).
 - Tratamento de erros de rede, de protocolo e de entrada.
 
@@ -27,7 +27,7 @@ Requisitos atendidos:
 
 - **Coletor** (`src/collector.py`): único processo com um socket UDP ligado a uma porta fixa. Recebe datagramas de qualquer sensor, mantém uma tabela de estado por sensor (último número de sequência, último instante visto, situação) e responde apenas a `REG` e `BYE`, os comandos que exigem confirmação. Não mantém conexão com ninguém.
 - **Sensor** (`src/sensor.py`): gera leituras simuladas, envia `REG` e depois um `DATA` a cada intervalo. Cada sensor tem um socket UDP próprio e uma **sessão** (8 caracteres hexadecimais gerados no boot). Retransmite `REG` e `BYE` até receber `ACK`.
-- **Protocolo** (`src/protocol.py`): codificação, decodificação e validação das mensagens TelemP/1.0.
+- **Protocolo** (`src/protocol.py`): codificação, decodificação e validação das mensagens TelemProto/1.0.
 
 ```mermaid
 flowchart LR
@@ -117,7 +117,7 @@ Funcionaria, mas com custos que não compensam para esse cenário:
 
 O coletor escuta em `0.0.0.0` por padrão. A porta 6000 está fora das portas bem conhecidas (0–1023), conforme a seção 2.1.2 do livro.
 
-## 6. Protocolo da aplicação: TelemP/1.0
+## 6. Protocolo da aplicação: TelemProto/1.0
 
 - **Codificação:** ASCII imprimível (`0x20`–`0x7E`). `CR`, `LF` e `NUL` são inválidos.
 - **Unidade de transmissão:** um datagrama UDP contém exatamente uma mensagem. Não é preciso delimitador de fim de mensagem, diferentemente do fluxo TCP. O UDP preserva fronteiras de mensagem.

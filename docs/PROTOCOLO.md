@@ -1,4 +1,4 @@
-# TelemP/1.0 — Especificação do protocolo de aplicação
+# TelemProto/1.0 — Especificação do protocolo de aplicação
 
 **Status:** rascunho para revisão · **Versão do documento:** 0.1 · **Data:** 2026-10-26
 
