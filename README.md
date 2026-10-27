@@ -1,4 +1,4 @@
-# [Nome do Projeto]: Telemetria de Sensores com Sockets UDP
+# Telem: Telemetria de Sensores com Sockets UDP
 
 Trabalho avaliativo da disciplina **Fundamentos de Redes de Computadores**, baseado no Capítulo 2 (Camada de Aplicação) de *Redes de Computadores e a Internet: Uma Abordagem Top-Down*, de Kurose e Ross.
 
