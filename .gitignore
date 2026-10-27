@@ -8,3 +8,5 @@
 !Atividade avaliativa.md
 !README.md
 !.gitignore
+__pycache__/
+*.pyc
