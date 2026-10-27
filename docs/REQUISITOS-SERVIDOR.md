@@ -5,9 +5,7 @@
 Especifica o comportamento do processo **coletor**. O formato das mensagens está em
 [PROTOCOLO.md](PROTOCOLO.md); este documento não repete a gramática, apenas referencia.
 
----
-
-## 1. Objetivo
+## Objetivo
 
 Receber datagramas de N sensores, manter o estado de cada um, detectar perdas,
 duplicatas, reordenações e silêncio, e apresentar o resultado sem nunca abortar por
@@ -47,7 +45,7 @@ causa de entrada malformada.
 | RF-14 | Nunca criar entrada de tabela a partir de `DATA` ou `BYE`. |
 | RF-15 | Isolar falhas: `try/except` por datagrama; qualquer exceção inesperada é registrada e o loop continua. |
 | RF-16 | Encerrar por `Ctrl+C`/`SIGTERM`: parar o loop, imprimir o resumo final, fechar o socket e sair com 0. |
-| RF-17 | Expor a lógica de tratamento em uma unidade testável sem sockets: `handle(raw: bytes, addr) -> list[Reply]`, onde `Reply` é `(bytes, addr)`. |
+| RF-17 | Separar a lógica de tratamento em uma unidade sem socket: `handle(raw: bytes, addr) -> HandleResult`, com `replies: tuple[Reply, ...]` (payload, destino e tipo `ack`/`err`) e `events: tuple[Event, ...]`. |
 | RF-18 | Injetar falha para demonstração: `--drop-ack P` descarta `ACK`/`ERR` com probabilidade P, registrando cada descarte. Serve para a evidência de retransmissão de `REG` no Wireshark. |
 
 ## 4. Requisitos não funcionais
@@ -57,12 +55,12 @@ causa de entrada malformada.
 | RNF-01 | Apenas biblioteca padrão (`socket`, `selectors`, `time`, `argparse`, `secrets`, `json`, `logging`); Python ≥ 3.10. |
 | RNF-02 | Latência de detecção de silêncio ≤ 1 s após o limite. |
 | RNF-03 | Memória limitada por `max_sensors × (estado + max_readings)`; nenhum crescimento por `id` forjado. |
-| RNF-04 | 10 000 datagramas aleatórios não derrubam o processo nem o deixam lento. |
+| RNF-04 | Rajada de datagramas malformados (verificação manual) não derruba o processo nem o deixa lento. |
 | RNF-05 | Funcionar em Windows e Linux; documentar a diferença de `ConnectionRefusedError` no sensor (ICMP port unreachable). |
 | RNF-06 | Nenhuma operação bloqueante > 100 ms no loop principal. |
 | RNF-07 | Timeouts com `time.monotonic()`; `time.time()` apenas para exibição e para o `timestamp` do sensor. |
 | RNF-08 | 50 sensores a 1 Hz com uso de CPU < 5% na máquina da demonstração. |
-| RNF-09 | Lógica testável sem abrir socket; testes com `unittest` (`python -m unittest`). |
+| RNF-09 | Lógica de estado (`SensorTable`) separada do I/O de socket (`Collector`); a entrega não inclui suíte de testes automatizados. |
 
 ## 5. Modelo de estado
 
@@ -160,6 +158,7 @@ Seja `s` o `seq` do `DATA` recebido e `last` o último aceito (`None` antes do p
 | `--retention` | `60` | tempo de retenção de linha `departed` (s) |
 | `--refresh` | `1.0` | período de redesenho da tabela (s) |
 | `--drop-ack` | `0.0` | probabilidade de descartar `ACK`/`ERR` (demonstração) |
+| `--seed` | — | semente de `--drop-ack` (capturas reproduzíveis) |
 | `--json` | desligado | eventos em NDJSON em vez da tabela |
 | `--log-file` | — | arquivo adicional de log |
 | `--verbose` | desligado | nível DEBUG |
@@ -184,7 +183,7 @@ Seja `s` o `seq` do `DATA` recebido e `last` o último aceito (`None` antes do p
 | 3 | falha de socket/bind (porta ocupada, endereço inválido) |
 | 4 | erro interno não tratado fora do loop |
 
-## 9. Critérios de aceitação
+## 9. Critérios de aceitação (verificação manual)
 
 | ID | Cenário | Resultado esperado |
 | --- | --- | --- |
@@ -196,13 +195,13 @@ Seja `s` o `seq` do `DATA` recebido e `last` o último aceito (`None` antes do p
 | AC-06 | `REG` com sessão nova para `id` ativo | `ERR NAME_IN_USE`, estado antigo intacto |
 | AC-07 | `BYE` e `REG` imediato de sessão nova | aceito na hora |
 | AC-08 | Silêncio > `max(15, 3×interval)` | `silent` em ≤ 1 s após o limite |
-| AC-09 | 10 000 datagramas aleatórios | processo vivo, `ERR` limitado, sem entrada nova |
+| AC-09 | Rajada de datagramas malformados | processo vivo, `ERR` limitado, sem entrada nova |
 | AC-10 | Datagrama de 600 bytes | `TOO_LONG`, resposta ≤ 64 B |
 | AC-11 | `DATA` de `id` desconhecido | `NOT_REGISTERED`, nenhuma linha criada |
 | AC-12 | Reinício sem `BYE` (matar o sensor) | `NAME_IN_USE` até o silêncio; o sensor retenta e registra depois do timeout |
 | AC-13 | `--port 0` | loga a porta efetiva; cliente consegue registrar |
 | AC-14 | `--drop-ack 0.5` com um sensor | log de `DROP` e retransmissão de `REG` visível no Wireshark |
-| AC-15 | 50 sensores a 1 Hz por 60 s | nenhum `lost` falso; CPU < 5% |
+| AC-15 | 50 sensores a 1 Hz por 60 s (verificação manual) | nenhum `lost` falso; CPU < 5% |
 
 ## 10. Estrutura de código sugerida
 
@@ -212,14 +211,12 @@ src/
 ├── protocol.py     # constantes, encode/decode, ProtocolError(code)
 ├── collector.py    # SensorTable + Collector (I/O, selectors, CLI)
 └── sensor.py       # cliente
-tests/
-├── test_protocol.py    # round-trip, todos os exemplos do PROTOCOLO §11
-├── test_collector.py   # AC-01..AC-12 sem socket
-└── test_integration.py # AC-13, AC-14 (porta efêmera)
+scripts/
+└── demo.py         # opcional: coletor + 3 sensores
 ```
 
-`collector.py` fica dividido em duas camadas: `SensorTable` (estado + contadores,
-testável puro) e `Collector` (socket, `selectors`, tabela de saída, CLI).
+`collector.py` fica dividido em duas camadas: `SensorTable` (estado + contadores, sem
+socket) e `Collector` (socket, `selectors`, tabela de saída, CLI).
 
 ## 11. Fora de escopo
 

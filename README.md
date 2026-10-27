@@ -230,7 +230,7 @@ Tabela com identificador, situação, endereço, intervalo, último número de s
 
 ## 11. Captura de tráfego (Wireshark)
 
-Arquivo: `captura/telemetria.pcapng`. Filtro de exibição: `udp.port == 6000`.
+Arquivo: `capture/telemetria.pcapng`. Filtro de exibição: `udp.port == 6000`.
 
 Evidências a apresentar:
 
