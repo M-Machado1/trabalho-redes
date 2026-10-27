@@ -162,8 +162,8 @@ stateDiagram-v2
     [*] --> Registrando: boot (gera sessão, seq = 1)
     Registrando --> Registrado: ACK|REG com id + sessão
     Registrando --> Registrando: sem ACK em 4 s (1 envio + 3 retransmissões)
-    Registrando --> Registrando: NAME_IN_USE (até 3 tentativas)
-    Registrando --> Falha: BAD_INTERVAL ou 3× NAME_IN_USE
+    Registrando --> Registrando: NAME_IN_USE (dentro da carência)
+    Registrando --> Falha: BAD_INTERVAL ou carência esgotada
     Registrado --> Registrado: DATA a cada intervalo
     Registrado --> Registrando: ERR|NOT_REGISTERED
     Registrado --> Encerrando: Ctrl+C / fim de --count
@@ -194,7 +194,13 @@ stateDiagram-v2
 | Código | Reação do sensor |
 | --- | --- |
 | `NOT_REGISTERED` | volta a `Registrando` imediatamente, mantém `seq` e sessão; descarta a leitura atual |
-| `NAME_IN_USE` | log de aviso e volta a `Registrando` no próximo intervalo, até 3 tentativas; se persistir, saída com código 5 |
+| `NAME_IN_USE` | log de aviso e nova tentativa a cada `interval`; se o `id` continuar em uso ao fim da carência, saída com código 5 |
+
+A carência é `max(15 s, 3 × interval) + 2 s`, contada a partir do primeiro
+`NAME_IN_USE`. Ela existe porque o coletor só libera o `id` após o tempo de
+inatividade (`max(15 s, 3 × interval)`); a margem de 2 s cobre o atraso entre a
+liberação e a próxima tentativa. Se as respostas pararem no meio da carência, o
+sensor também encerra com código 5 ao fim dela — não fica em laço indefinido.
 | `BAD_INTERVAL` | falha permanente (configuração inválida): saída com código 2 |
 | `VALUE_OUT_OF_RANGE` | bug do sensor: log e segue; a leitura é descartada pelo coletor |
 | `BAD_REQUEST`, `TOO_LONG`, `SERVER_ERROR` | log e segue (indica bug ou versão incompatível) |
@@ -226,7 +232,9 @@ faixa de valor**.
 | `VALUE_MIN` / `VALUE_MAX` | −50.0 / 150.0 |
 | `REG_TIMEOUT` | 1.0 s |
 | `REG_ATTEMPTS` | 4 (1 envio + 3 retransmissões) |
-| `NAME_IN_USE_ATTEMPTS` | 3 |
+| `NAME_IN_USE_GRACE_MIN` | 15 s (piso da carência) |
+| `NAME_IN_USE_GRACE_FACTOR` | 3 × `interval` |
+| `NAME_IN_USE_GRACE_MARGIN` | 2 s |
 | `BYE_TIMEOUT` | 0.5 s |
 | `BYE_ATTEMPTS` | 3 |
 | `ERR_MAX_BYTES` | 64 |
