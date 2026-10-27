@@ -1,7 +1,10 @@
 **/*
-!capture/**/*
-!docs/**/*
+!src/
 !src/**/*
+!docs/
+!docs/**/*
+!capture/
+!capture/**/*
 !Atividade avaliativa.md
 !README.md
 !.gitignore
