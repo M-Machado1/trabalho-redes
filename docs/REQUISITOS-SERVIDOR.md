@@ -165,8 +165,8 @@ Seja `s` o `seq` do `DATA` recebido e `last` o último aceito (`None` antes do p
 
 ### 8.2 Saída
 
-- **stdout:** tabela (TTY, redesenhada com ANSI) ou snapshots (não-TTY); com `--json`,
-  um evento NDJSON por linha.
+- **stdout:** tabela redesenhada no lugar (TTY; `cls` no Windows e ANSI no POSIX) ou
+  snapshots (não-TTY); com `--json`, um evento NDJSON por linha.
 - **stderr:** log. Formato `hh:mm:ss.mmm LEVEL evento chave=valor ...`, mensagens em
   PT-BR.
 - Colunas da tabela: `id`, `status`, `addr`, `interval`, `seq`, `value`, `age`,

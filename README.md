@@ -228,7 +228,7 @@ O coletor aceita `--drop-ack 0.3`, que descarta 30% dos `ACK`/`ERR` enviados. Us
 
 ### Saída do coletor:
 
-Tabela com identificador, situação, endereço, intervalo, último número de sequência, último valor, idade do último datagrama e contadores de perdas, duplicatas e reordenações.
+Tabela com identificador, situação, endereço, intervalo, último número de sequência, último valor, idade do último datagrama e contadores de perdas, duplicatas e reordenações. Em um terminal, a tabela é redesenhada no mesmo lugar a cada `--refresh` segundos; com a saída redirecionada para um arquivo, cada atualização é acrescentada como um bloco novo.
 
 ## 11. Captura de tráfego (Wireshark)
 

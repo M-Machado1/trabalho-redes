@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import random
 import selectors
 import signal
@@ -775,6 +776,24 @@ def render_table(rows: Sequence[SensorRow], now: float) -> str:
     return "\n".join(lines)
 
 
+def clear_console() -> None:
+    """Clear the terminal before redrawing the table.
+
+    ``cls`` is used on Windows because not every Windows console understands
+    ANSI escape sequences; on POSIX the standard ANSI clear sequence is enough.
+    When stdout is redirected, nothing is cleared, so the table snapshots stay
+    append-only in the file.
+    """
+
+    if not sys.stdout.isatty():
+        return
+    if os.name == "nt":
+        os.system("cls")
+    else:
+        sys.stdout.write("\x1b[2J\x1b[H")
+        sys.stdout.flush()
+
+
 class _LogFormatter(logging.Formatter):
     """``hh:mm:ss.mmm LEVEL message`` as required by REQUISITOS §8.2."""
 
@@ -1026,11 +1045,9 @@ class Collector:
     def _render(self) -> None:
         if self.config.json:
             return
+        clear_console()
         text = render_table(self.table.snapshot(), time.time())
-        if sys.stdout.isatty():
-            self._write(f"\x1b[2J\x1b[H{text}")
-        else:
-            self._write(f"{text}\n")
+        self._write(text)
 
     def _publish(self, event: Event) -> None:
         self.logger.log(
