@@ -195,15 +195,15 @@ stateDiagram-v2
 | --- | --- |
 | `NOT_REGISTERED` | volta a `Registrando` imediatamente, mantém `seq` e sessão; descarta a leitura atual |
 | `NAME_IN_USE` | log de aviso e nova tentativa a cada `interval`; se o `id` continuar em uso ao fim da carência, saída com código 5 |
+| `BAD_INTERVAL` | falha permanente (configuração inválida): saída com código 2 |
+| `VALUE_OUT_OF_RANGE` | bug do sensor: log e segue; a leitura é descartada pelo coletor |
+| `BAD_REQUEST`, `TOO_LONG`, `SERVER_ERROR` | log e segue (indica bug ou versão incompatível) |
 
 A carência é `max(15 s, 3 × interval) + 2 s`, contada a partir do primeiro
 `NAME_IN_USE`. Ela existe porque o coletor só libera o `id` após o tempo de
 inatividade (`max(15 s, 3 × interval)`); a margem de 2 s cobre o atraso entre a
 liberação e a próxima tentativa. Se as respostas pararem no meio da carência, o
 sensor também encerra com código 5 ao fim dela — não fica em laço indefinido.
-| `BAD_INTERVAL` | falha permanente (configuração inválida): saída com código 2 |
-| `VALUE_OUT_OF_RANGE` | bug do sensor: log e segue; a leitura é descartada pelo coletor |
-| `BAD_REQUEST`, `TOO_LONG`, `SERVER_ERROR` | log e segue (indica bug ou versão incompatível) |
 
 ## 8. Códigos de erro
 
@@ -289,4 +289,4 @@ opcional no fim) são registradas neste documento sem incrementar a versão.
 | §7 confirmação do `REG` | §5.1, §7.1 |
 | §8 erros | §7.3, §8, §10 |
 | §8 sensor silencioso | REQUISITOS-SERVIDOR §5 |
-| §10 `--perda` | §7.1 (não vale para `REG`/`BYE`) |
+| §10 `--loss` | §7.1 (não vale para `REG`/`BYE`) |
