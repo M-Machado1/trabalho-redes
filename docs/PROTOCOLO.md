@@ -289,4 +289,4 @@ opcional no fim) são registradas neste documento sem incrementar a versão.
 | §7 confirmação do `REG` | §5.1, §7.1 |
 | §8 erros | §7.3, §8, §10 |
 | §8 sensor silencioso | REQUISITOS-SERVIDOR §5 |
-| §10 `--perda` | §7.1 (não vale para `REG`/`BYE`) |
+| §10 `--loss` | §7.1 (não vale para `REG`/`BYE`) |

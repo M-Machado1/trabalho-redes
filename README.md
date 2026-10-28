@@ -180,7 +180,7 @@ trabalho-redes/
 ├── docs/
 │   ├── PROTOCOLO.md
 │   └── REQUISITOS-SERVIDOR.md
-├── capture/
+├── capture/                # a criar (Etapa 7)
 │   └── telemetria.pcapng
 └── src/
     ├── __init__.py
