@@ -181,7 +181,8 @@ trabalho-redes/
 ├── docs/
 │   ├── PROTOCOLO.md
 │   └── REQUISITOS-SERVIDOR.md
-├── capture/                # a criar (Etapa 7)
+├── capture/
+│   ├── NOTAS-DEMO.md       # verificações e roteiro da apresentação
 │   └── telemetria.pcapng
 └── src/
     ├── __init__.py
@@ -233,6 +234,8 @@ Tabela com identificador, situação, endereço, intervalo, último número de s
 
 Arquivo: `capture/telemetria.pcapng`. Filtro de exibição: `udp.port == 6000`.
 
+A captura foi feita no loopback do WSL2 com `tcpdump` e reúne quatro cenários (sessão normal, ACK perdido, perda de DATA e reinício sem BYE). Os quadros têm comentários de pacote marcando cada ponto; a correspondência quadro a quadro, os resultados de V-01..V-08/AC-01..AC-15 e o roteiro da apresentação estão em [capture/NOTAS-DEMO.md](./capture/NOTAS-DEMO.md).
+
 Evidências a apresentar:
 
 1. **Ausência de handshake:** o primeiro datagrama já é `REG`, sem SYN, SYN-ACK ou ACK.
@@ -249,13 +252,13 @@ Evidências a apresentar:
 | --- | --- |
 | 1. Qual problema a aplicação resolve? | Seção 1 |
 | 2. Quem são os processos envolvidos? | Seção 3 |
-| 3. Como ocorre a comunicação? | Seções 3 e 6; `docs/PROTOCOLO.md` §2 |
+| 3. Como ocorre a comunicação? | Seções 3 e 6; [PROTOCOLO.md](./docs/PROTOCOLO.md) §2 |
 | 4. Qual protocolo de transporte? | Seção 4 |
 | 5. Por que esse protocolo é adequado? | Seção 4, "Justificativa" |
 | 6. Qual é o protocolo da aplicação? | Seções 6 e 7; [PROTOCOLO.md](./docs/PROTOCOLO.md) |
 | 7. Quais mensagens podem ser trocadas? | Seção 7; [PROTOCOLO.md](./docs/PROTOCOLO.md) §5 |
 | 8. O que aconteceria com o outro protocolo? | Seção 4, "E se fosse usado TCP?" |
-| 9. Quais situações de erro podem ocorrer? | Seção 8; [REQUISITOS-SERVIDOR.md](,/docs/REQUISITOS-SERVIDOR.md) §7 |
-| 10. Como essas situações são tratadas? | Seção 8; `docs/PROTOCOLO.md` §7.3 e [REQUISITOS-SERVIDOR.md](,/docs/REQUISITOS-SERVIDOR.md) §6–§7 |
+| 9. Quais situações de erro podem ocorrer? | Seção 8; [REQUISITOS-SERVIDOR.md](./docs/REQUISITOS-SERVIDOR.md) §7 |
+| 10. Como essas situações são tratadas? | Seção 8; [PROTOCOLO.md](./docs/PROTOCOLO.md) §7.3 e [REQUISITOS-SERVIDOR.md](./docs/REQUISITOS-SERVIDOR.md) §6–§7 |
 
 Especificação detalhada: [PROTOCOLO.md](./docs/PROTOCOLO.md) (gramática, mensagens, erros e a máquina de estados do sensor) e [REQUISITOS-SERVIDOR.md](./docs/REQUISITOS-SERVIDOR.md) (requisitos, contadores, interface e critérios de aceitação).
