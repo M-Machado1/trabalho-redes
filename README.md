@@ -14,6 +14,7 @@ Requisitos atendidos:
 - Comunicação por sockets UDP (`SOCK_DGRAM`).
 - Protocolo de aplicação próprio, em texto, chamado **TelemProto/1.0**.
 - Mecanismos próprios de confiabilidade apenas onde são necessários (registro, saída e detecção de perdas).
+- Extras do desafio implementados: múltiplos sensores simultâneos, logs do coletor (`--log-file` e `--json`) e confiabilidade própria sobre UDP (retransmissão de `REG` e `BYE` e detecção de perdas).
 - Tratamento de erros de rede, de protocolo e de entrada.
 
 ## 2. Integrantes
@@ -21,7 +22,7 @@ Requisitos atendidos:
 | Nome | Matrícula | Responsabilidade |
 | --- | --- | --- |
 | Renan Albuquerque Santos | 2025012480 | Servidor |
-| Murilo | [matrícula] | Cliente |
+| Murilo Linhares | 2025012542 | Cliente |
 
 ## 3. Arquitetura
 
@@ -236,7 +237,7 @@ Evidências a apresentar:
 
 1. **Ausência de handshake:** o primeiro datagrama já é `REG`, sem SYN, SYN-ACK ou ACK.
 2. **Payload legível:** `REG|1|s01|5|a1b2c3d4`, `DATA|1|s01|a1b2c3d4|3|...` e `ACK|1|REG|s01|a1b2c3d4` aparecem em texto claro (use *Follow UDP Stream*).
-3. **Cabeçalho UDP de 8 bytes:** comparar com o cabeçalho TCP de 20 bytes da alternativa de chat.
+3. **Cabeçalho UDP de 8 bytes:** comparar com o cabeçalho TCP, de no mínimo 20 bytes, que seria usado se a aplicação adotasse TCP.
 4. **Retransmissão do REG:** com `--drop-ack 0.5` no coletor, dois `REG` com a **mesma sessão** e cerca de 1 s de diferença.
 5. **Lacunas de sequência:** datagramas `DATA` com números de sequência faltando, correspondendo aos registros do coletor.
 6. **Ausência de controle de congestionamento:** os datagramas saem no ritmo definido pela aplicação, sem reduções de taxa.
