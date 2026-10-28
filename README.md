@@ -252,10 +252,10 @@ Evidências a apresentar:
 | 3. Como ocorre a comunicação? | Seções 3 e 6; `docs/PROTOCOLO.md` §2 |
 | 4. Qual protocolo de transporte? | Seção 4 |
 | 5. Por que esse protocolo é adequado? | Seção 4, "Justificativa" |
-| 6. Qual é o protocolo da aplicação? | Seções 6 e 7; `docs/PROTOCOLO.md` |
-| 7. Quais mensagens podem ser trocadas? | Seção 7; `docs/PROTOCOLO.md` §5 |
+| 6. Qual é o protocolo da aplicação? | Seções 6 e 7; [PROTOCOLO.md](./docs/PROTOCOLO.md) |
+| 7. Quais mensagens podem ser trocadas? | Seção 7; [PROTOCOLO.md](./docs/PROTOCOLO.md) §5 |
 | 8. O que aconteceria com o outro protocolo? | Seção 4, "E se fosse usado TCP?" |
-| 9. Quais situações de erro podem ocorrer? | Seção 8; `docs/REQUISITOS-SERVIDOR.md` §7 |
-| 10. Como essas situações são tratadas? | Seção 8; `docs/PROTOCOLO.md` §7.3 e `docs/REQUISITOS-SERVIDOR.md` §6–§7 |
+| 9. Quais situações de erro podem ocorrer? | Seção 8; [REQUISITOS-SERVIDOR.md](,/docs/REQUISITOS-SERVIDOR.md) §7 |
+| 10. Como essas situações são tratadas? | Seção 8; `docs/PROTOCOLO.md` §7.3 e [REQUISITOS-SERVIDOR.md](,/docs/REQUISITOS-SERVIDOR.md) §6–§7 |
 
-Especificação detalhada: [`docs/PROTOCOLO.md`](docs/PROTOCOLO.md) (gramática, mensagens, erros e a máquina de estados do sensor) e [`docs/REQUISITOS-SERVIDOR.md`](docs/REQUISITOS-SERVIDOR.md) (requisitos, contadores, interface e critérios de aceitação).
+Especificação detalhada: [PROTOCOLO.md](./docs/PROTOCOLO.md) (gramática, mensagens, erros e a máquina de estados do sensor) e [REQUISITOS-SERVIDOR.md](./docs/REQUISITOS-SERVIDOR.md) (requisitos, contadores, interface e critérios de aceitação).
