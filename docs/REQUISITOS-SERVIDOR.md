@@ -39,7 +39,7 @@ causa de entrada malformada.
 | RF-08 | `BYE`: marcar `departed`, enviar `ACK` do `BYE`, manter a linha para o relatório por `--retention` segundos e depois removê-la. |
 | RF-09 | Detectar silêncio com relógio monotônico: `offline_after = max(--offline-min, --offline-factor × interval)`. A transição `active → silent` deve ocorrer em até 1 s depois do limite. |
 | RF-10 | Manter contadores por sessão conforme §7, com janela de 64 sequências para distinguir duplicata de atrasado. |
-| RF-11 | Guardar as últimas `--max-readings` leituras por sensor (padrão 120) em memória, para o resumo final. Não há banco de dados. |
+| RF-11 | Guardar as últimas `--max-readings` leituras por sensor (padrão 120) em memória, para o resumo final. Não há banco de dados; o estado pode ser salvo em JSON no encerramento (RF-19). |
 | RF-12 | Limitar a memória: `--max-sensors` (padrão 256); com a tabela cheia, remover a entrada `departed` mais antiga, depois a `silent` mais antiga e, se todas estiverem `active`, recusar `REG` com `SERVER_ERROR`. |
 | RF-13 | Enviar no máximo 1 `ERR` por IP de origem por segundo (burst 3) e 20 `ERR`/s no total; acima disso, descartar em silêncio e contar em `err_suppressed`. Cada `ERR` tem no máximo 64 bytes e não ecoa dados da requisição. |
 | RF-14 | Nunca criar entrada de tabela a partir de `DATA` ou `BYE`. |
@@ -47,6 +47,7 @@ causa de entrada malformada.
 | RF-16 | Encerrar por `Ctrl+C`/`SIGTERM`: parar o loop, imprimir o resumo final, fechar o socket e sair com 0. |
 | RF-17 | Separar a lógica de tratamento em uma unidade sem socket: `handle(raw: bytes, addr) -> HandleResult`, com `replies: tuple[Reply, ...]` (payload, destino e tipo `ack`/`err`) e `events: tuple[Event, ...]`. |
 | RF-18 | Injetar falha para demonstração: `--drop-ack P` descarta `ACK`/`ERR` com probabilidade P, registrando cada descarte. Serve para a evidência de retransmissão de `REG` no Wireshark. |
+| RF-19 | Persistir o estado em JSON: carregar o arquivo no início e salvá-lo de forma atômica no encerramento, com `--state-file` (padrão `collector-state.json`). `--no-state` desliga a persistência. Arquivo ausente inicia a tabela vazia; arquivo inválido gera erro no log e a tabela também inicia vazia. |
 
 ## 4. Requisitos não funcionais
 
@@ -98,6 +99,7 @@ Campos da linha:
 | `first_seen`, `registered_at` | float (wall) | exibição |
 | `last_seen_mono` | float (monotonic) | timeout |
 | `last_seen_wall` | float | exibição |
+| `departed_at`, `departed_at_wall` | float \| None | instante do `BYE` (monotonic/wall) |
 | `last_seq` | int \| None | `None` até o primeiro `DATA` |
 | `received`, `lost`, `dup`, `late` | int | §7 |
 | `last_value`, `last_value_ts` | float, int | última leitura aceita |
@@ -161,6 +163,8 @@ Seja `s` o `seq` do `DATA` recebido e `last` o último aceito (`None` antes do p
 | `--seed` | — | semente de `--drop-ack` (capturas reproduzíveis) |
 | `--json` | desligado | eventos em NDJSON em vez da tabela |
 | `--log-file` | — | arquivo adicional de log |
+| `--state-file` | `collector-state.json` | estado carregado no início e salvo no encerramento |
+| `--no-state` | desligado | não carrega nem salva o estado |
 | `--verbose` | desligado | nível DEBUG |
 
 ### 8.2 Saída
@@ -183,6 +187,24 @@ Seja `s` o `seq` do `DATA` recebido e `last` o último aceito (`None` antes do p
 | 3 | falha de socket/bind (porta ocupada, endereço inválido) |
 | 4 | erro interno não tratado fora do loop |
 
+### 8.4 Arquivo de estado
+
+O coletor grava um documento JSON com `schema: "telemproto.collector-state"`,
+`version: 1` e uma lista `sensors`. Cada sensor guarda `id`, `session`, `addr`,
+`interval`, `status`, instantes de parede (`first_seen`, `registered_at`,
+`last_seen`, `departed_at`), último `seq`/valor, contadores, janela recente e as
+últimas `--max-readings` leituras.
+
+- A gravação usa um arquivo temporário no mesmo diretório e `os.replace`, para não
+  deixar um JSON truncado se o processo for interrompido.
+- No carregamento, os instantes monotônicos são reconstruídos a partir da diferença
+  entre o relógio de parede salvo e o atual. Timeouts continuam usando
+  `time.monotonic()`.
+- O `status` é preservado; a primeira varredura de expiração do novo processo aplica
+  `silent`/`departed` conforme a idade real.
+- Um arquivo inválido ou de versão desconhecida é registrado no log e ignorado; o
+  coletor inicia com a tabela vazia.
+
 ## 9. Critérios de aceitação (verificação manual)
 
 | ID | Cenário | Resultado esperado |
@@ -202,6 +224,7 @@ Seja `s` o `seq` do `DATA` recebido e `last` o último aceito (`None` antes do p
 | AC-13 | `--port 0` | loga a porta efetiva; cliente consegue registrar |
 | AC-14 | `--drop-ack 0.5` com um sensor | log de `DROP` e retransmissão de `REG` visível no Wireshark |
 | AC-15 | 50 sensores a 1 Hz por 60 s (verificação manual) | nenhum `lost` falso; CPU < 5% |
+| AC-16 | Encerrar o coletor (`Ctrl+C`) e iniciar de novo com o mesmo `--state-file` | tabela, contadores, janela e leituras restaurados; `--no-state` ignora o arquivo; JSON inválido inicia vazio sem derrubar |
 
 ## 10. Estrutura de código sugerida
 
@@ -221,7 +244,7 @@ socket) e `Collector` (socket, `selectors`, tabela de saída, CLI).
 ## 11. Fora de escopo
 
 - Autenticação, criptografia e proteção contra origem forjada.
-- Persistência em banco; o histórico é só memória.
+- Persistência em banco relacional; o estado é salvo apenas em um JSON local no encerramento.
 - Exportação de métricas (Prometheus etc.).
 - IPv6.
 - Controle de congestionamento próprio além dos limites de RF-12 e RF-13.

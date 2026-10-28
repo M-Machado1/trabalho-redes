@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import random
 import selectors
@@ -46,6 +47,16 @@ from .protocol import (
 )
 
 SEQUENCE_WINDOW = 64
+STATE_SCHEMA = "telemproto.collector-state"
+STATE_VERSION = 1
+
+
+def _is_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 class SensorStatus(str, Enum):
@@ -126,6 +137,7 @@ class _Row:
     last_seen_mono: float
     last_seen_wall: float
     departed_at: float | None = None
+    departed_at_wall: float | None = None
     last_seq: int | None = None
     received: int = 0
     lost: int = 0
@@ -243,6 +255,276 @@ class SensorTable:
             )
         )
 
+    # -- persistence ----------------------------------------------------
+
+    def export_state(self) -> dict[str, object]:
+        """Return a JSON-serialisable snapshot of every row.
+
+        Monotonic clocks are process-local, so only wall-clock instants are
+        stored. :meth:`load_state` converts them back when the process starts.
+        """
+
+        return {
+            "schema": STATE_SCHEMA,
+            "version": STATE_VERSION,
+            "saved_at": round(time.time(), 3),
+            "sensors": [
+                self._export_row(row)
+                for row in sorted(
+                    self._rows.values(), key=lambda item: item.sensor_id
+                )
+            ],
+        }
+
+    @staticmethod
+    def _export_row(row: _Row) -> dict[str, object]:
+        return {
+            "id": row.sensor_id,
+            "session": row.session,
+            "addr": {"ip": row.addr[0], "port": row.addr[1]},
+            "interval": row.interval,
+            "status": row.status.value,
+            "first_seen": round(row.first_seen, 3),
+            "registered_at": round(row.registered_at, 3),
+            "last_seen": round(row.last_seen_wall, 3),
+            "departed_at": (
+                None
+                if row.departed_at_wall is None
+                else round(row.departed_at_wall, 3)
+            ),
+            "last_seq": row.last_seq,
+            "last_value": row.last_value,
+            "last_value_ts": row.last_value_ts,
+            "counters": {
+                "received": row.received,
+                "lost": row.lost,
+                "dup": row.dup,
+                "late": row.late,
+            },
+            "recent": list(row.recent),
+            "readings": [
+                {
+                    "seq": reading.seq,
+                    "timestamp": reading.timestamp,
+                    "value": reading.value,
+                }
+                for reading in row.readings
+            ],
+        }
+
+    def load_state(self, document: object) -> int:
+        """Replace the table with the rows stored in ``document``.
+
+        The whole document is validated before any row is installed, so a
+        corrupt file never leaves a half-restored table. Returns the number of
+        loaded rows and raises :class:`ValueError` when the document is not a
+        supported state file.
+        """
+
+        if not isinstance(document, dict):
+            raise ValueError("state document is not an object")
+        if document.get("schema") != STATE_SCHEMA:
+            raise ValueError("unknown state schema")
+        if document.get("version") != STATE_VERSION:
+            raise ValueError("unsupported state version")
+        entries = document.get("sensors")
+        if not isinstance(entries, list):
+            raise ValueError("state document has no 'sensors' list")
+
+        now_mono = time.monotonic()
+        now_wall = time.time()
+        rows: dict[str, _Row] = {}
+        for index, entry in enumerate(entries):
+            row = self._load_row(entry, index, now_mono, now_wall)
+            if row.sensor_id in rows:
+                raise ValueError(
+                    f"sensors[{index}]: duplicate id {row.sensor_id!r}"
+                )
+            rows[row.sensor_id] = row
+
+        self._rows = rows
+        return len(rows)
+
+    def _load_row(
+        self,
+        entry: object,
+        index: int,
+        now_mono: float,
+        now_wall: float,
+    ) -> _Row:
+        where = f"sensors[{index}]"
+        if not isinstance(entry, dict):
+            raise ValueError(f"{where}: expected an object")
+
+        sensor_id = entry.get("id")
+        if not isinstance(sensor_id, str) or not sensor_id:
+            raise ValueError(f"{where}: invalid 'id'")
+        session = entry.get("session")
+        if not isinstance(session, str) or not session:
+            raise ValueError(f"{where}: invalid 'session'")
+
+        addr = entry.get("addr")
+        if not isinstance(addr, dict):
+            raise ValueError(f"{where}: invalid 'addr'")
+        host = addr.get("ip")
+        port = addr.get("port")
+        if (
+            not isinstance(host, str)
+            or not host
+            or not _is_int(port)
+            or not 0 <= port <= 65535
+        ):
+            raise ValueError(f"{where}: invalid 'addr'")
+
+        interval = entry.get("interval")
+        if not _is_int(interval) or not 1 <= interval <= 3600:
+            raise ValueError(f"{where}: invalid 'interval'")
+
+        status_raw = entry.get("status")
+        if not isinstance(status_raw, str):
+            raise ValueError(f"{where}: invalid 'status'")
+        try:
+            status = SensorStatus(status_raw)
+        except ValueError:
+            raise ValueError(f"{where}: invalid 'status'") from None
+
+        first_seen = self._state_number(entry, "first_seen", where)
+        registered_at = self._state_number(entry, "registered_at", where)
+        last_seen_wall = self._state_number(entry, "last_seen", where)
+        departed_raw = entry.get("departed_at")
+        if departed_raw is None:
+            departed_at_wall = None
+        elif _is_number(departed_raw):
+            departed_at_wall = float(departed_raw)
+            if not math.isfinite(departed_at_wall):
+                raise ValueError(f"{where}: invalid 'departed_at'")
+        else:
+            raise ValueError(f"{where}: invalid 'departed_at'")
+
+        last_seq = entry.get("last_seq")
+        if last_seq is not None and (
+            not _is_int(last_seq) or not 1 <= last_seq <= 9_999_999_999
+        ):
+            raise ValueError(f"{where}: invalid 'last_seq'")
+
+        last_value = entry.get("last_value")
+        if last_value is not None:
+            if not _is_number(last_value):
+                raise ValueError(f"{where}: invalid 'last_value'")
+            last_value = float(last_value)
+            if not math.isfinite(last_value):
+                raise ValueError(f"{where}: invalid 'last_value'")
+
+        last_value_ts = entry.get("last_value_ts")
+        if last_value_ts is not None and (
+            not _is_int(last_value_ts)
+            or not 0 <= last_value_ts <= 9_999_999_999
+        ):
+            raise ValueError(f"{where}: invalid 'last_value_ts'")
+
+        counters = entry.get("counters")
+        if not isinstance(counters, dict):
+            raise ValueError(f"{where}: invalid 'counters'")
+
+        def counter(name: str) -> int:
+            value = counters.get(name)
+            if not _is_int(value) or value < 0:
+                raise ValueError(f"{where}: invalid counter {name!r}")
+            return value
+
+        received = counter("received")
+        lost = counter("lost")
+        dup = counter("dup")
+        late = counter("late")
+
+        recent_raw = entry.get("recent")
+        if not isinstance(recent_raw, list):
+            raise ValueError(f"{where}: invalid 'recent'")
+        recent: list[int] = []
+        for position, seq in enumerate(recent_raw):
+            if not _is_int(seq) or not 1 <= seq <= 9_999_999_999:
+                raise ValueError(f"{where}: invalid 'recent[{position}]'")
+            recent.append(seq)
+        recent = recent[-SEQUENCE_WINDOW:]
+
+        readings_raw = entry.get("readings")
+        if not isinstance(readings_raw, list):
+            raise ValueError(f"{where}: invalid 'readings'")
+        readings: list[Reading] = []
+        for position, item in enumerate(readings_raw):
+            label = f"{where}: readings[{position}]"
+            if not isinstance(item, dict):
+                raise ValueError(f"{label}: expected an object")
+            seq = item.get("seq")
+            timestamp = item.get("timestamp")
+            value = item.get("value")
+            if not _is_int(seq) or not 1 <= seq <= 9_999_999_999:
+                raise ValueError(f"{label}: invalid 'seq'")
+            if (
+                not _is_int(timestamp)
+                or not 0 <= timestamp <= 9_999_999_999
+            ):
+                raise ValueError(f"{label}: invalid 'timestamp'")
+            if not _is_number(value):
+                raise ValueError(f"{label}: invalid 'value'")
+            number = float(value)
+            if not math.isfinite(number):
+                raise ValueError(f"{label}: invalid 'value'")
+            readings.append(
+                Reading(seq=seq, timestamp=timestamp, value=number)
+            )
+
+        last_seen_mono = now_mono - max(0.0, now_wall - last_seen_wall)
+        if status is SensorStatus.DEPARTED:
+            stamp = (
+                departed_at_wall
+                if departed_at_wall is not None
+                else last_seen_wall
+            )
+            departed_at = now_mono - max(0.0, now_wall - stamp)
+            departed_at_wall = stamp
+        else:
+            departed_at = None
+            departed_at_wall = None
+
+        limit = max(0, self.config.max_readings)
+        loaded_readings = readings[-limit:] if limit else []
+        return _Row(
+            sensor_id=sensor_id,
+            session=session,
+            addr=(host, port),
+            interval=interval,
+            status=status,
+            first_seen=first_seen,
+            registered_at=registered_at,
+            last_seen_mono=last_seen_mono,
+            last_seen_wall=last_seen_wall,
+            departed_at=departed_at,
+            departed_at_wall=departed_at_wall,
+            last_seq=last_seq,
+            received=received,
+            lost=lost,
+            dup=dup,
+            late=late,
+            last_value=last_value,
+            last_value_ts=last_value_ts,
+            recent=deque(recent, maxlen=SEQUENCE_WINDOW),
+            recent_set=set(recent),
+            readings=deque(loaded_readings, maxlen=limit),
+        )
+
+    @staticmethod
+    def _state_number(
+        entry: dict[str, object], key: str, where: str
+    ) -> float:
+        value = entry.get(key)
+        if not _is_number(value):
+            raise ValueError(f"{where}: invalid {key!r}")
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError(f"{where}: invalid {key!r}")
+        return number
+
     # -- message handlers ----------------------------------------------
 
     def _register(self, message: Register, addr: Address) -> HandleResult:
@@ -296,6 +578,7 @@ class SensorTable:
             if previous is not SensorStatus.ACTIVE:
                 row.status = SensorStatus.ACTIVE
                 row.departed_at = None
+                row.departed_at_wall = None
                 events.append(
                     Event(
                         "REACTIVATED",
@@ -379,6 +662,7 @@ class SensorTable:
         previous = row.status
         row.status = SensorStatus.ACTIVE
         row.departed_at = None
+        row.departed_at_wall = None
         row.last_seen_mono = now_mono
         row.last_seen_wall = now_wall
 
@@ -486,8 +770,9 @@ class SensorTable:
 
         row.status = SensorStatus.DEPARTED
         row.departed_at = time.monotonic()
+        row.departed_at_wall = time.time()
         row.last_seen_mono = row.departed_at
-        row.last_seen_wall = time.time()
+        row.last_seen_wall = row.departed_at_wall
         row.addr = addr
         return HandleResult(
             (self._ack(row, "BYE"),),
@@ -622,6 +907,7 @@ class CollectorConfig:
     seed: int | None = None
     json: bool = False
     log_file: str | None = None
+    state_file: str | None = "collector-state.json"
     verbose: bool = False
 
     def table_config(self) -> TableConfig:
@@ -871,6 +1157,7 @@ class Collector:
             return 3
 
         self._install_signal_handlers()
+        self._load_state()
         code = 0
         try:
             self._log_startup()
@@ -881,6 +1168,7 @@ class Collector:
             self.logger.exception("erro interno fora do laco de datagramas")
             code = 4
         finally:
+            self._save_state()
             self._close()
             summary = self._summary()
             self._publish(Event("SUMMARY", summary))
@@ -908,6 +1196,56 @@ class Collector:
             pass
         finally:
             self._sock = None
+
+    # -- state file -----------------------------------------------------
+
+    def _load_state(self) -> None:
+        path = self.config.state_file
+        if path is None:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                document = json.load(handle)
+            count = self.table.load_state(document)
+        except FileNotFoundError:
+            self.logger.debug("nenhum estado anterior arquivo=%s", path)
+            return
+        except (OSError, ValueError, TypeError, RecursionError) as exc:
+            self.logger.error(
+                "falha ao carregar estado arquivo=%s erro=%s", path, exc
+            )
+            return
+        self.logger.info(
+            "estado carregado arquivo=%s sensores=%s", path, count
+        )
+
+    def _save_state(self) -> None:
+        path = self.config.state_file
+        if path is None:
+            return
+        temp = f"{path}.tmp"
+        try:
+            document = self.table.export_state()
+            with open(temp, "w", encoding="utf-8") as handle:
+                json.dump(document, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp, path)
+        except (OSError, TypeError, ValueError) as exc:
+            self.logger.error(
+                "falha ao salvar estado arquivo=%s erro=%s", path, exc
+            )
+            try:
+                os.remove(temp)
+            except OSError:
+                pass
+            return
+        self.logger.info(
+            "estado salvo arquivo=%s sensores=%s",
+            path,
+            len(self.table.snapshot()),
+        )
 
     def _configure_logging(self) -> None:
         formatter = _LogFormatter()
@@ -1187,6 +1525,18 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="ARQUIVO",
         help="arquivo adicional de log",
     )
+    state_group = parser.add_mutually_exclusive_group()
+    state_group.add_argument(
+        "--state-file",
+        default="collector-state.json",
+        metavar="ARQUIVO",
+        help="estado JSON carregado no inicio e salvo no encerramento",
+    )
+    state_group.add_argument(
+        "--no-state",
+        action="store_true",
+        help="nao carrega nem salva o estado em JSON",
+    )
     parser.add_argument(
         "--verbose",
         action="store_true",
@@ -1218,6 +1568,12 @@ def config_from_args(args: argparse.Namespace) -> CollectorConfig:
         raise ValueError("--refresh deve ser maior que zero")
     if not 0.0 <= args.drop_ack <= 1.0:
         raise ValueError("--drop-ack deve ficar entre 0 e 1")
+    if args.no_state:
+        state_file = None
+    else:
+        if not args.state_file.strip():
+            raise ValueError("--state-file nao pode ser vazio")
+        state_file = args.state_file
     return CollectorConfig(
         host=args.host,
         port=args.port,
@@ -1232,6 +1588,7 @@ def config_from_args(args: argparse.Namespace) -> CollectorConfig:
         seed=args.seed,
         json=args.json,
         log_file=args.log_file,
+        state_file=state_file,
         verbose=args.verbose,
     )
 

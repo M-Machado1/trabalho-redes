@@ -1,7 +1,7 @@
 # Notas de demonstração e captura
 
 Registro das verificações manuais da Etapa 7 e do roteiro de apresentação.
-Complementa o README §11 e os critérios AC-01..AC-15 de
+Complementa o README §11 e os critérios AC-01..AC-16 de
 [REQUISITOS-SERVIDOR.md](../docs/REQUISITOS-SERVIDOR.md) §9.
 
 ## Ambiente
@@ -48,7 +48,7 @@ e D em 28,2–47,1 s.
 | 6 | Sem controle de congestionamento | `DATA` do cenário A em 0,002 s, 2,004 s, 4,004 s e 6,004 s: o ritmo é o do aplicativo, sem redução por perda ou ACK. |
 | 7 | Sessão | Quadro 24 usa `4ba22859` (processo antigo); quadro 29 usa `3a70ff04` (processo novo) e recebe `NAME_IN_USE`; quadro 59 tem o novo `REG` aceito. Nos quadros 9/10 a retransmissão mantém a mesma sessão, separando perda de ACK de reinício. |
 
-## Verificação V-01..V-08 (PLAN §8)
+## Verificação V-01..V-09 (PLAN §8)
 
 | # | Cenário | Resultado |
 | --- | --- | --- |
@@ -60,8 +60,9 @@ e D em 28,2–47,1 s.
 | V-06 | Duplicata/atraso | 70 leituras; `seq=70` repetida → `dup=1`; `seq=1` reenviada fora da janela → `late=1`; `last_seq=70` e último valor preservado. |
 | V-07 | Entrada inválida | `lixo` → `ERR\|BAD_REQUEST`; 600 bytes → `ERR\|TOO_LONG`; `DATA` sem registro → `ERR\|NOT_REGISTERED`; `REG` válido em seguida recebe `ACK`, sem linha criada pelos erros. |
 | V-08 | Muitos sensores | 20 sensores × 3 leituras; `sensors=20`, `received=60`, `lost=0`, `dup=0`, `late=0`; todos os `BYE` confirmados. |
+| V-09 | Persistência do estado | Coletor + `s09` (`--interval 1 --count 3`) com `--state-file`; encerramento por sinal salvou `status=departed`, `received=3` e 3 leituras; o segundo processo carregou `sensores=1`. |
 
-## Critérios de aceitação AC-01..AC-15
+## Critérios de aceitação AC-01..AC-16
 
 | Critério | Resultado |
 | --- | --- |
@@ -80,6 +81,7 @@ e D em 28,2–47,1 s.
 | AC-13 | `--port 0` → porta efetiva registrada no log; sensor registrou e `received=1`. |
 | AC-14 | `--drop-ack 0.5` → `DROP` no log e retransmissão visível na captura (cenário B). |
 | AC-15 | 50 sensores a 1 Hz por 60 s → 3000 leituras, `lost=0`, `dup=0`, `late=0`, CPU do coletor 0,99%, RSS 18 476 kB. |
+| AC-16 | Encerramento por sinal e reinício com o mesmo `--state-file` → linha, contadores, janela e leituras restaurados; `--no-state` não cria/le o arquivo; JSON inválido inicia vazio e o processo continua. |
 
 ## Reprodução
 

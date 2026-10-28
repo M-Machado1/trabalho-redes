@@ -14,7 +14,7 @@ Requisitos atendidos:
 - Comunicação por sockets UDP (`SOCK_DGRAM`).
 - Protocolo de aplicação próprio, em texto, chamado **TelemProto/1.0**.
 - Mecanismos próprios de confiabilidade apenas onde são necessários (registro, saída e detecção de perdas).
-- Extras do desafio implementados: múltiplos sensores simultâneos, logs do coletor (`--log-file` e `--json`) e confiabilidade própria sobre UDP (retransmissão de `REG` e `BYE` e detecção de perdas).
+- Extras do desafio implementados: múltiplos sensores simultâneos, logs do coletor (`--log-file` e `--json`), persistência do estado em JSON no encerramento e confiabilidade própria sobre UDP (retransmissão de `REG` e `BYE` e detecção de perdas).
 - Tratamento de erros de rede, de protocolo e de entrada.
 
 ## 2. Integrantes
@@ -192,9 +192,11 @@ trabalho-redes/
 
 ```
 
+O arquivo `collector-state.json` é gerado em tempo de execução pelo coletor e não faz parte do repositório.
+
 ## 10. Instruções de execução
 
-**Requisitos:** Python 3.10 ou superior. Não há dependências externas (apenas biblioteca padrão: `socket`, `selectors`, `secrets`, `time`, `random`, `argparse`, `logging`).
+**Requisitos:** Python 3.10 ou superior. Não há dependências externas (apenas biblioteca padrão: `socket`, `selectors`, `secrets`, `time`, `random`, `argparse`, `json`, `logging`, `os`).
 
 Os comandos abaixo são executados **na raiz do repositório**, porque `src` é um pacote. No Windows, use `python` no lugar de `python3`.
 
@@ -226,6 +228,20 @@ O sensor aceita `--loss 0.2`, que descarta aleatoriamente 20% dos `DATA` antes d
 
 O coletor aceita `--drop-ack 0.3`, que descarta 30% dos `ACK`/`ERR` enviados. Use para observar a retransmissão do `REG` no Wireshark.
 
+### Persistência do estado:
+
+Por padrão, o coletor carrega `collector-state.json` ao iniciar e grava o estado nele ao encerrar com `Ctrl+C`/`SIGTERM`. O arquivo guarda a tabela, os contadores, a janela de sequências e as últimas leituras de cada sensor, então um reinício continua de onde parou.
+
+```sh
+python3 -m src.collector --state-file meu-estado.json
+python3 -m src.collector --no-state
+```
+
+- `--state-file ARQUIVO` escolhe outro caminho; `--no-state` desliga a persistência.
+- A gravação é atômica: o JSON é escrito em `ARQUIVO.tmp` e só então substitui o arquivo final.
+- Um arquivo ausente inicia a tabela vazia; um arquivo inválido gera erro no log e também inicia vazio, sem derrubar o coletor.
+- Os timeouts continuam usando `time.monotonic()`; no carregamento, a idade de cada sensor é reconstruída a partir dos instantes de parede salvos.
+
 ### Saída do coletor:
 
 Tabela com identificador, situação, endereço, intervalo, último número de sequência, último valor, idade do último datagrama e contadores de perdas, duplicatas e reordenações. Em um terminal, a tabela é redesenhada no mesmo lugar a cada `--refresh` segundos; com a saída redirecionada para um arquivo, cada atualização é acrescentada como um bloco novo.
@@ -234,7 +250,7 @@ Tabela com identificador, situação, endereço, intervalo, último número de s
 
 Arquivo: `capture/telemetria.pcapng`. Filtro de exibição: `udp.port == 6000`.
 
-A captura foi feita no loopback do WSL2 com `tcpdump` e reúne quatro cenários (sessão normal, ACK perdido, perda de DATA e reinício sem BYE). Os quadros têm comentários de pacote marcando cada ponto; a correspondência quadro a quadro, os resultados de V-01..V-08/AC-01..AC-15 e o roteiro da apresentação estão em [capture/NOTAS-DEMO.md](./capture/NOTAS-DEMO.md).
+A captura foi feita no loopback do WSL2 com `tcpdump` e reúne quatro cenários (sessão normal, ACK perdido, perda de DATA e reinício sem BYE). Os quadros têm comentários de pacote marcando cada ponto; a correspondência quadro a quadro, os resultados de V-01..V-09/AC-01..AC-16 e o roteiro da apresentação estão em [capture/NOTAS-DEMO.md](./capture/NOTAS-DEMO.md).
 
 Evidências a apresentar:
 
