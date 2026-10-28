@@ -205,7 +205,7 @@ Os comandos abaixo são executados **na raiz do repositório**, porque `src` é 
 Em um terminal:
 
 ```sh
-python3 -m src.collector --host 0.0.0.0 --port 6000
+python -m src.collector --host 0.0.0.0 --port 6000
 ```
 
 ### 2. Iniciar um ou mais sensores
@@ -213,8 +213,8 @@ python3 -m src.collector --host 0.0.0.0 --port 6000
 Em outros terminais:
 
 ```sh
-python3 -m src.sensor --host 127.0.0.1 --port 6000 --id s01 --interval 5
-python3 -m src.sensor --host 127.0.0.1 --port 6000 --id s02 --interval 3
+python -m src.sensor --host 127.0.0.1 --port 6000 --id s01 --interval 5
+python -m src.sensor --host 127.0.0.1 --port 6000 --id s02 --interval 3
 ```
 
 >[!tip]

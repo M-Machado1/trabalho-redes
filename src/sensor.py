@@ -83,7 +83,6 @@ class SensorClient:
             )
             self._logger.addHandler(handler)
         self._sock: socket.socket | None = None
-        # FSM state (initialised in :meth:`run`).
         self.next_data: float | None = None
         self.data_start: float | None = None
         self.data_n: int = 0
@@ -111,7 +110,6 @@ class SensorClient:
             return 3
 
         self._sock = sock
-        # Reset FSM state for a fresh run.
         self.readings_sent = 0
         self.next_data = None
         self.data_start = None
@@ -138,7 +136,7 @@ class SensorClient:
             self._close()
         return code
 
-    # -- FSM ------------------------------------------------------------
+    # ---------------------------------------------------------
 
     def _loop(self, sock: socket.socket) -> int:
         """Main event loop. Returns the process exit code."""
@@ -162,7 +160,6 @@ class SensorClient:
                     )
                     return 5
 
-            # Immediate, non-blocking actions.
             if (
                 not self.registered
                 and not self.reg_waiting
@@ -200,7 +197,6 @@ class SensorClient:
                     )
                 continue
 
-            # Wait for the next deadline or an incoming datagram.
             if self.registered:
                 deadline = self.next_data
             elif self.reg_waiting:
@@ -235,7 +231,7 @@ class SensorClient:
 
         return 0
 
-    # -- message handling -------------------------------------------------
+    # -- message handling --------------------------------------
 
     def _process_incoming(
         self, raw: bytes, now: float
@@ -336,7 +332,7 @@ class SensorClient:
         finally:
             sock.settimeout(None)
 
-    # -- sending ----------------------------------------------------------
+    # -- sending -----------------------------------------------
 
     def _send_reg(self, sock: socket.socket) -> None:
         payload = encode(
@@ -422,7 +418,7 @@ class SensorClient:
             BYE_ATTEMPTS,
         )
 
-    # -- logging / closure -----------------------------------------------
+    # -- logging / closure ------------------------------------
 
     def _info(self, msg: str, *args: object) -> None:
         self._logger.info(msg, *args)
@@ -447,7 +443,7 @@ class SensorClient:
             self._sock = None
 
 
-# -- command line ----------------------------------------------------------
+# -- command line -----------------------------------------
 
 
 def build_parser() -> argparse.ArgumentParser:
